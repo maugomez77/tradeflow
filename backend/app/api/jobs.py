@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.demo_data import JOBS, CUSTOMERS, TECHNICIANS
+from app import store
 from app.models import Job, JobStatus, JobType
 
 router = APIRouter(prefix="/api", tags=["jobs"])
@@ -38,7 +38,7 @@ async def list_jobs(
     technician: Optional[str] = None,
     type: Optional[str] = None,
 ):
-    result = JOBS[:]
+    result = store.list_jobs()
     if status:
         result = [j for j in result if j.status == status]
     if technician:
@@ -50,7 +50,7 @@ async def list_jobs(
 
 @router.get("/jobs/{job_id}", response_model=Job)
 async def get_job(job_id: str):
-    for j in JOBS:
+    for j in store.list_jobs():
         if j.id == job_id:
             return j
     raise HTTPException(status_code=404, detail="Job not found")
@@ -60,18 +60,19 @@ async def get_job(job_id: str):
 async def create_job(req: CreateJobRequest):
     # Look up customer and technician names
     customer_name = ""
-    for c in CUSTOMERS:
+    for c in store.list_customers():
         if c.id == req.customer_id:
             customer_name = c.name
             break
 
     technician_name = ""
-    for t in TECHNICIANS:
+    for t in store.list_technicians():
         if t.id == req.technician_id:
             technician_name = t.name
             break
 
-    new_id = f"job-{len(JOBS) + 1:03d}"
+    existing_jobs = store.list_jobs()
+    new_id = f"job-{len(existing_jobs) + 1:03d}"
     job = Job(
         id=new_id,
         title=req.title,
@@ -88,22 +89,29 @@ async def create_job(req: CreateJobRequest):
         notes=req.notes,
         created_at=datetime.now(),
     )
-    JOBS.append(job)
+    store.append_job(job)
     return job
 
 
 @router.patch("/jobs/{job_id}", response_model=Job)
 async def update_job(job_id: str, req: UpdateJobRequest):
-    for i, j in enumerate(JOBS):
+    technicians = store.list_technicians()
+
+    def _apply(job_dict: dict) -> dict:
+        updates = req.model_dump(exclude_none=True, mode="json")
+        job_dict.update(updates)
+        if req.technician_id:
+            for t in technicians:
+                if t.id == req.technician_id:
+                    job_dict["technician_name"] = t.name
+                    break
+        # Re-validate so we get a clean JSON-serializable dict back in the blob.
+        return Job(**job_dict).model_dump(mode="json")
+
+    if not store.update_job(job_id, _apply):
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    for j in store.list_jobs():
         if j.id == job_id:
-            data = j.model_dump()
-            updates = req.model_dump(exclude_none=True)
-            data.update(updates)
-            if req.technician_id:
-                for t in TECHNICIANS:
-                    if t.id == req.technician_id:
-                        data["technician_name"] = t.name
-                        break
-            JOBS[i] = Job(**data)
-            return JOBS[i]
+            return j
     raise HTTPException(status_code=404, detail="Job not found")

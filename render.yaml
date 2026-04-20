@@ -9,3 +9,5 @@ services:
     envVars:
       - key: FRONTEND_URL
         value: https://tradeflow-pro-khaki.vercel.app
+      - key: DATABASE_URL
+        sync: false

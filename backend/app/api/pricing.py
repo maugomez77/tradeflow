@@ -1,10 +1,8 @@
 """Pricing API endpoints."""
 
-from datetime import datetime
-
 from fastapi import APIRouter, Query
 
-from app.demo_data import PRICING_RULES
+from app import store
 from app.models import PriceCalculation, PricingRule
 
 router = APIRouter(prefix="/api", tags=["pricing"])
@@ -12,7 +10,7 @@ router = APIRouter(prefix="/api", tags=["pricing"])
 
 @router.get("/pricing", response_model=list[PricingRule])
 async def list_pricing():
-    return PRICING_RULES
+    return store.list_pricing_rules()
 
 
 @router.get("/pricing/calculate", response_model=PriceCalculation)
@@ -23,16 +21,31 @@ async def calculate_price(
     is_weekend: bool = Query(False),
     is_peak: bool = Query(False),
 ):
+    rules = store.list_pricing_rules()
+
     # Find matching rule
     rule = None
-    for r in PRICING_RULES:
+    for r in rules:
         if r.job_type == job_type:
             rule = r
             break
 
     if rule is None:
-        # Fallback to general
-        rule = PRICING_RULES[-1]
+        # Fallback to general (last rule)
+        rule = rules[-1] if rules else None
+
+    if rule is None:
+        # No pricing rules configured; return a minimal zero calc
+        return PriceCalculation(
+            job_type=job_type,
+            base_rate=0.0,
+            hours=hours,
+            multiplier=1.0,
+            multiplier_reasons=["No pricing rules configured"],
+            subtotal=0.0,
+            tax=0.0,
+            total=0.0,
+        )
 
     # Calculate multiplier
     multiplier = 1.0
